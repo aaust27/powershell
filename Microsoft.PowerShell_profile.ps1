@@ -1,7 +1,4 @@
 
-#$host.ui.RawUI.WindowTitle = "PowerShell 11.01"
-
-
 <#function global:prompt
 {
     $runTime = '[00:00:000]' 
