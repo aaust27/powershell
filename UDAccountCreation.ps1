@@ -1,0 +1,201 @@
+New-UDPage -Name "NewUser" -Title "New User Account" -Icon "user" -AuthorizationPolicy "Workstation Administrators" -Endpoint {
+    New-UDRow -Columns {
+        New-UDColumn -LargeSize 12{}
+            New-UDInput -Title "Create New User" -Validate -Endpoint {
+
+                param(
+                [ValidateSet("vlab.local","awdallas")]
+                $Domain,
+                [ValidateSet("","COE","001-Burlington","001-Plainview","002-Baltimore","004-Charlotte","005-Orlando","006-Miami","007-Ashland","008-Atlanta",
+                "009-Birmingham","011-Pittsburgh","012-Maine","014-Boston","015-Dallas","016-Houston","017-New Orleans","018-Memphis",
+                "019-Hartford","020-Denver","020-Grand Junction","021-New York","023-St. Louis","025-Tampa","026-Austin","027-Nashville",
+                "028-San Antonio","029-Corpus Christi","030-Phoenix","040-Albuquerque","040-Lubbock","042-San Diego","043-Los Angeles",
+                "044-Union City","051-Indianapolis","052-Columbus","054-Detroit","055-Tulsa","057-Oklahoma City","062-Seattle","063-Portland",
+                "065-Salt Lake City","066-Syracuse","068-Sacramento","070-Cleveland","072-Chicago","073-New Jersey","074-Minneapolis",
+                "076-Kansas City","079-Louisville","724-Plainview","832-New Orleans","835-Fayetteville","840-Lubbock","842-Greenville",
+				"845-Atlanta","847-Charlotte","848-Raleigh","849-Orlando","851-Chicago","852-Denver","853-Kansas City","854-Southern California",
+				"858-Miami","859-Phoenix","860-Richmond","861-San Antonio","862-Tampa","863-Northern California","864-Columbus","865-Indianapolis",
+				"868-Washington DC","872-Austin","873-Houston","875-Nashville","876-Savannah","877-Jacksonville","878-Dallas","879-Triad",
+				"880-St. Louis","881-Louisville","882-Oklahoma City","883-Memphis","884-Tulsa","885-Corpus Christi","886-Charleston","887-Ft. Myers",
+				"888-Cincinnati","889-Norfolk","891-Detroit","892-Salt Lake City","895-Columbia","896-Wilmington","897-Birmingham")]
+                $Location,
+                [ValidateSet("","Application Specialist","AW Field Service Tech","AW Installer","Business Development Manager",
+                "Card Services","COE_Inside Sales","Collection Manager","Collector","Counter","CSR","CSR Lead",
+                "CSR Quality","Driver/Installer","Inside Sales","Install Manager","Installer","IT Helpdesk","Lead Driver",
+                "Parts Manager","RFS","Sales","Service Manager","Service Tech","Triage Team Template","Warehouse Manager")]
+                $JobTitle,
+                #[Parameter(Mandatory)]
+                #[string]$FirstName,
+                #[Parameter(Mandatory)]
+                #[string]$LastName,
+                #[Parameter(Mandatory)]
+                #[string]$Username,
+                #[Parameter(Mandatory)]
+                #[string]$PW #>
+
+                [Parameter(Mandatory)]
+                [string]$FirstName,
+                [Parameter(Mandatory)]
+                [string]$LastName,
+                [Parameter(Mandatory)]
+                [UniversalDashboard.ValidationErrorMessage("Username is already taken")]
+                [ValidateScript( {
+                    $User = Get-ADUser -Filter "SamAccountName -eq '$_'"
+                    if($User) { $False } else { $True }
+                } )]
+                [String]$Username,
+                [Parameter(Mandatory)]
+                [string]$PW
+                )
+
+
+                if($Location -eq "awdallas"){
+                    $BranchPath = "OU=$Location,OU=Appliance Warehouse,OU=CSCSW-UCM,DC=coinmach,DC=local"
+                }elseif($Location -eq "Coinmach"){
+                    $BranchPath = "OU=$location,OU=CSCSW-UCM,DC=coinmach,DC=local"
+                }
+                $BranchPath = "OU=$Location,OU=CSCSW-UCM,DC=coinmach,DC=local"
+                #$UserProperties = Get-Aduser -Filter {Name -eq "Collector"}  -SearchBase "OU=014-Boston,OU=Coinmach,OU=Templates,DC=coinmach,DC=local" -Properties *
+                $UserProperties = Get-Aduser -Filter {Name -eq $JobTitle}  -SearchBase "OU=$Location,OU=Coinmach,OU=Templates,DC=coinmach,DC=local" -Properties *
+
+                if(-not $UserProperties) {
+                    Write-Error "A template account for title [$JobTitle] does not exist for location [$Location]"
+                    return
+                }
+
+                $tFname = $FirstName.Trim()
+                $tLname = $LastName.Trim()
+                $DisplayName = "$tFname $tLname"
+                $lUsername = $Username.ToLower()
+
+
+                $NewAdUserSplat = @{
+                    Name              = $DisplayName
+                    SamAccountName    = $lUsername
+                    AccountPassword   = (ConvertTo-SecureString $PW -AsPlainText -Force)
+                    givenname         = $tFname
+                    #Initials         = ""
+                    surname           = $tLname
+                    Path              = $BranchPath
+                    streetaddress     = $UserProperties.streetaddress
+                    City              = $UserProperties.City
+                    postalcode        = $UserProperties.postalcode
+                    state             = $UserProperties.state
+                    country           = $UserProperties.country
+                    OfficePhone       = $UserProperties.OfficePhone
+                    title             = $JobTitle
+                    company           = $UserProperties.company
+                    homepage          = $UserProperties.homepage
+                    userPrincipalName = $lUsername+"@cscsw.com"
+                    Displayname       = $DisplayName
+                    Enabled           = $True
+
+                    }
+
+
+
+                    $NewCreatedUser = New-ADUser -PassThru @NewAdUserSplat
+
+
+                    Start-Sleep -Seconds 3
+
+
+                    $PasswordNotExpireTitles = @(
+                        "AW Installer"
+                        "Service Technician"
+                        "Service Tech"
+                        "Installer"
+                        "Collector"
+                        "Driver"
+                        "AW Driver"
+                    )
+
+                    if($PasswordNotExpireTitles -contains $NewCreatedUser.Title) {
+                        Set-ADUser $NewCreatedUser.DistinguishedName -PasswordNeverExpires $true -CannotChangePassword $true
+                    }
+
+                $MemberOfGroups = Get-ADUser $UserProperties.SamAccountName -Properties MemberOf | Select-Object -ExpandProperty MemberOf | Where-Object { $_ -notlike "*Domain Users*" }
+
+                    foreach($MemberOfGroup in $MemberOfGroups) {
+                        Add-ADGroupMember $MemberOfGroup -Members $lUsername
+                    }
+
+                    Set-ADUser $NewCreatedUser.DistinguishedName -Replace @{ info = "Customer Service" }
+                    Set-ADUser $NewCreatedUser.DistinguishedName -ScriptPath "clarify.bat"#>
+
+
+
+                            
+            #Connect to exchange server
+            
+
+            $ExchangeSessionSplat = @{
+                ConfigurationName = "Microsoft.Exchange"
+                ConnectionUri = "http://COIN01-NY-EX05.coinmach.local/PowerShell"
+                Authentication = "Kerberos"
+                ErrorAction = "Stop"
+            }
+
+            $SessionCheck = Get-PSSession
+
+            if($SessionCheck.ConfigurationName -eq 'Microsoft.Exchange') {
+                Write-Verbose "Already connected to exchange server"
+            } else {
+                Write-Verbose "Connecting to Exchange server $($ExchangeSessionSplat["ConnectionUri"])"
+                $ExchangeSession = New-PSSession @ExchangeSessionSplat -Verbose:$false
+
+                Write-Verbose "Importing the Exchange module"
+                $ImportPSSessionSplat = @{
+                    Session     = $ExchangeSession
+                    CommandName = @(
+                        "Get-Mailbox"
+                        "Set-Mailbox"
+                        "Enable-Mailbox"
+                        "Get-MailboxDatabase"
+                    )
+                    ErrorAction = "Stop"
+                    Verbose     = $false
+                }
+                $null = Import-PSSession @ImportPSSessionSplat
+            }
+
+            $NewCreatedUserTitle = $NewCreatedUser.Title;
+
+            $ExecTitles = @(
+                "Sales"
+                "Executive"
+                "Area Sales Manager"
+            )
+
+            if($NewCreatedUserTitle -in $ExecTitles) {
+                $MailboxDatabase = Get-MailboxDatabase | Where-Object Name -like "ExecutiveDB*" | Get-Random | Select-Object -ExpandProperty Name
+            } else {
+                $MailboxDatabase = Get-MailboxDatabase | Where-Object Name -like "GeneralDB*" | Get-Random | Select-Object -ExpandProperty Name
+            }
+
+            $EnableMailboxSplat = @{
+                Identity           = $lUsername
+                Alias              = $lUsername
+                Database           = $MailboxDatabase
+                PrimarySmtpAddress = "$lusername@cscsw.com"
+            }
+            $Mailbox = Enable-Mailbox @EnableMailboxSplat
+
+            Set-Mailbox $Mailbox.DistinguishedName -EmailAddressPolicyEnabled $false
+            Set-Mailbox $Mailbox.DistinguishedName -EmailAddresses @{ Add = "smtp:$lUsername@appliancewhse.com" }
+
+
+
+            New-UDInputAction -ClearInput -Toast "Clearing Input"
+
+            Show-UDToast -Message "User $lusername Created" -Duration 6000 # -TransitionIn bounceInRight
+        }
+    }
+}
+
+Import-Module UniversalDashboard
+
+
+
+Get-UDDashboard | Stop-UDDashboard
+Start-UDDashboard -Port 1004 -Dashboard $MyDashboard -AutoReload 
