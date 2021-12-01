@@ -1,1 +1,216 @@
+Set-ExecutionPolicy -ExecutionPolicy Unrestricted -Scope CurrentUser
+Clear-Host
+Set-Location \
+if(Get-Command Out-GridView -ErrorAction SilentlyContinue) {
+    # This key handler shows the entire or filtered history using Out-GridView. The
+    # typed text is used as the substring pattern for filtering. A selected command
+    # is inserted to the command line without invoking. Multiple command selection
+    # is supported, e.g. selected by Ctrl + Click.
+    $ShowCommandHistoryScriptBlock = {
+        $Pattern = $null
+        [Microsoft.PowerShell.PSConsoleReadLine]::GetBufferState([ref]$Pattern, [ref]$null)
+        if($Pattern) {
+            $Pattern = [regex]::Escape($Pattern)
+        }
+
+        $Last = ""
+        $Lines = ""
+
+        $History = [System.Collections.ArrayList]@(
+            foreach($Line in [System.IO.File]::ReadLines((Get-PSReadlineOption).HistorySavePath)) {
+                if($Line.EndsWith('`')) {
+                    $Line = $Line.Substring(0, $Line.Length - 1)
+                    $Lines = if($Lines) {
+                        "$Lines`n$Line"
+                    } else {
+                        $Line
+                    }
+
+                    continue
+                }
+
+                if($Lines) {
+                    $Line = "$Lines`n$Line"
+                    $Lines = ""
+                }
+
+                if(($Line -cne $Last) -and (-not $Pattern -or ($Line -match $Pattern))) {
+                    $Last = $Line
+                    $Line
+                }
+            }
+        )
+
+        $History.Reverse()
+        # $Command = $History | Select-Object @{ Name = "Command"; Expression = { $_ } } | Out-GridView -Title History -PassThru | Select-Object -ExpandProperty Command
+        $Command = $History | Out-GridView -Title History -PassThru
+
+        if($Command) {
+            [Microsoft.PowerShell.PSConsoleReadLine]::RevertLine()
+            [Microsoft.PowerShell.PSConsoleReadLine]::Insert(($Command -join "`n"))
+        }
+    }
+
+    $ShowCommandHistorySplat = @{
+        Key              = "F7"
+        BriefDescription = "History"
+        LongDescription  = "Show command history"
+        ScriptBlock      = $ShowCommandHistoryScriptBlock
+    }
+    Set-PSReadlineKeyHandler @ShowCommandHistorySplat
+}
+
+
+
+function Menu {
+    Write-Host " "
+    Write-Host "           -AD USER ACCOUNTS-" -ForegroundColor Cyan  
+    Write-Host "           1. ADReset- Prompts for username and then you can set a new password" -ForegroundColor Green
+    Write-Host "           2. ADUserInfo- Prompts for username and pulls ADUser and ADComputer info" -ForegroundColor Green
+    Write-Host "           3. Unlock- Prompts for username and then unlocks the AD account" -ForegroundColor Green
+    Write-Host "           4. Title- Searches for users with similar job titles (Good for mirroring user accounts)" -ForegroundColor Green 
+    Write-Host "           5. Office- Pulls back all users that are in a certain office (exact match not needed for search)" -ForegroundColor Green
+    Write-Host " " 
+
+    $userlistselect = Read-Host "Selection" 
+    
+    if ($userlistselect -eq 1) {
+        adreset
+    }
+    elseif ($userlistselect -eq 2) {
+        U
+    }
+    elseif ($userlistselect -eq 3) {
+        Unlock
+    }
+    elseif ($userlistselect -eq 4) {
+        Title
+    }
+    elseif ($userlistselect -eq 5) {
+        Office
+    }
+}
+ 
+    function adreset {
+    param(
+        $Username
+    )
+
+    if(-not $Username) {
+        $username = Read-Host 'Enter Name'
+        $SecurePassword = Read-Host "Enter Password" -AsSecureString 
+    }
+    
+        #$BSTR = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($SecurePassword)
+        #$UnsecurePassword = [System.Runtime.InteropServices.Marshal]::PtrToStringAuto($BSTR)
+        Set-ADAccountPassword -Reset -NewPassword $SecurePassword –Identity $Username
+}
+
+function Unlock {
+    param(
+        $Username
+    )
+
+    if(-not $Username) {
+        $username = Read-Host 'Enter Name'
+        
+    }
+    
+    Unlock-ADAccount -Identity $username
+}
+
+function U {
+    param(
+        $Username
+    )
+
+    if(-not $Username) {
+        $username = Read-Host 'Enter Name '
+    }
+    
+    $ADUserProperties = @(
+    "SamAccountName"
+    "Name"
+    "Title"
+    "EmployeeID"
+    "Enabled" 
+    "LockedOut"
+    "PasswordLastSet"
+    "LastLogonDate"
+    "LastBadPasswordAttempt"
+    "MobilePhone"
+    "StreetAddress"
+    "l"
+    "st"
+    "mail"
+    "PostalCode"
+    "LogonCount"
+    "CanonicalName"
+
+    )
+
+$User = Get-ADUser -Filter "anr -eq '$username'" -Properties $ADUserProperties  | Select-Object $ADUserProperties
+
+[PSCustomObject]@{
+    UserID        = $User.SamAccountName
+    Name          = $User.Name
+    Title         = $User.Title
+    EmployeeID    = $User.EmployeeID
+    ADEnabled     = $User.Enabled
+    ADLocked      = $User.LockedOut
+    PWChanged     = $user.PasswordLastSet
+    LastLogonDate = $User.LastLogonDate
+    LastBadPW     = $user.LastBadPasswordAttempt
+    MobilePhone   = $User.MobilePhone
+    Address       = $User.StreetAddress
+    City          = $User.l
+    State         = $User.st
+    Zip           = $User.PostalCode
+    Email         = $User.mail
+    LogonCount    = $User.LogonCount
+    Location      = $User.CanonicalName
+}
+
+
+
+   
+    $ADComputerProperties = @(
+        "Name"
+        "OperatingSystem"
+        "IPv4Address"
+        "PasswordLastSet"
+        "LastLogOnDate"
+    )
+    
+    Get-ADComputer -Filter "Description -like '$($User.SamAccountName)'" -Properties $ADComputerProperties | Select-Object $ADComputerProperties
+}
+
+function Title { 
+    param ( 
+        $title 
+    ) 
+    if(-not $title) { 
+        $title = Read-Host 'Job Title' 
+    } 
+get-aduser -filter "title -like '*$title*'" -properties name,title,l,enabled,whenCreated,ipPhone | Select-Object name,title,l,enabled,whenCreated,ipPhone | Where-Object { $_.Enabled -eq $true } | Sort-Object title | Format-Table 
+}
+function Office {
+    param ( 
+        $Office
+    ) 
+    if(-not $Office) { 
+        $Office = Read-Host 'Office' 
+    }
+get-aduser -filter "Office -like '*$Office*'" -properties name,title,Office,enabled,whenCreated | Select-Object name,title,Office,enabled,whenCreated | Where-Object { $_.Enabled -eq $true } | Sort-Object title | Format-Table 
+} 
+
+function Offices {
+    param ( 
+           $Offices
+    ) 
+    if(-not $Offices) { 
+        $Offices = Read-Host 'Offices'
+    }    
+Get-ADUser -Filter "Office -like '*$Office*'" -properties Office | Select-Object -Unique
+}
 
